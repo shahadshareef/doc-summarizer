@@ -3,89 +3,150 @@
 <head>
     <title>Legal Document Summarizer</title>
     <style>
-        #progress-container {
-            width: 100%;
-            background-color: #ddd;
-            margin-top: 20px;
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f7fa;
+            padding: 30px;
+            max-width: 800px;
+            margin: auto;
         }
-        #progress-bar {
-            width: 0%;
-            height: 25px;
-            background-color: #4CAF50;
+
+        h2 {
+            color: #333;
             text-align: center;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        input[type="file"] {
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            width: 100%;
+            max-width: 400px;
+            cursor: pointer;
+        }
+
+        button {
+            padding: 10px 25px;
+            background-color: #4CAF50;
             color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
         }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        #progressBar {
+            width: 100%;
+            height: 25px;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-top: 15px;
+        }
+
+        #progressBar::-webkit-progress-bar {
+            background-color: #ddd;
+        }
+
+        #progressBar::-webkit-progress-value {
+            background-color: #4CAF50;
+        }
+
         #summary {
-            margin-top: 20px;
+            margin-top: 25px;
             white-space: pre-wrap;
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            max-height: 400px;
+            overflow-y: auto;
         }
-        #loading {
+
+        #loading, #savedMessage {
             font-weight: bold;
             color: #333;
+            text-align: center;
             margin-top: 15px;
+        }
+
+        #savedMessage {
+            color: #4CAF50;
         }
     </style>
 </head>
 <body>
     <h2>Upload Legal Document (PDF or TXT)</h2>
-   <form id="uploadForm" enctype="multipart/form-data">
-  <input type="file" name="document" required />
-  <button type="submit">Summarize</button>
-</form>
 
-<p id="loading" style="display:none;">⚡ Summarizing, please wait...</p>
-<progress id="progressBar" value="0" max="100" style="display:none; width:100%;"></progress>
-<div id="summary"></div>
+    <form id="uploadForm" enctype="multipart/form-data">
+        <input type="file" name="document" required />
+        <button type="submit">Summarize</button>
+    </form>
 
-<script>
-  document.getElementById("uploadForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
+    <p id="loading" style="display:none;">⚡ Summarizing, please wait...</p>
+    <progress id="progressBar" value="0" max="100" style="display:none;"></progress>
+    <p id="savedMessage" style="display:none;">✅ Summary saved!</p>
 
-    const formData = new FormData(e.target);
+    <div id="summary"></div>
 
-    // Show UI
-    document.getElementById("loading").style.display = "block";
-    document.getElementById("progressBar").style.display = "block";
-    document.getElementById("progressBar").value = 0;
-    document.getElementById("summary").innerText = "";
+    <script>
+        document.getElementById("uploadForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
 
-    // Use EventSource for SSE
-    const response = await fetch("/", {
-      method: "POST",
-      body: formData,
-    });
+            const formData = new FormData(e.target);
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
+            // Show UI
+            document.getElementById("loading").style.display = "block";
+            document.getElementById("progressBar").style.display = "block";
+            document.getElementById("progressBar").value = 0;
+            document.getElementById("summary").innerText = "";
+            document.getElementById("savedMessage").style.display = "none";
 
-    let summaryText = "";
+            const response = await fetch("/", {
+                method: "POST",
+                body: formData
+            });
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
 
-      const chunk = decoder.decode(value, { stream: true }).trim();
+            let summaryText = "";
 
-      chunk.split("\n\n").forEach((line) => {
-        if (line.startsWith("data:")) {
-          const data = line.replace("data: ", "").trim();
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-          if (data === "DONE") {
-            // Finished
-            document.getElementById("loading").style.display = "none";
-            return;
-          } else if (!isNaN(data)) {
-            // Progress update
-            document.getElementById("progressBar").value = parseInt(data);
-          } else {
-            // Final summary text
-            summaryText += data + " ";
-            document.getElementById("summary").innerText = summaryText;
-          }
-        }
-      });
-    }
-  });
-</script>
+                const chunk = decoder.decode(value, { stream: true }).trim();
+
+                chunk.split("\n\n").forEach(line => {
+                    if (line.startsWith("data:")) {
+                        const data = line.replace("data: ", "").trim();
+
+                        if (data === "DONE") {
+                            document.getElementById("loading").style.display = "none";
+                            document.getElementById("savedMessage").style.display = "block";
+                            return;
+                        } else if (!isNaN(data)) {
+                            document.getElementById("progressBar").value = parseInt(data);
+                        } else {
+                            summaryText += data + " ";
+                            document.getElementById("summary").innerText = summaryText;
+                        }
+                    }
+                });
+            }
+        });
+    </script>
 </body>
 </html>
