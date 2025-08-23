@@ -1,60 +1,75 @@
 import os
-import pandas as pd
+import csv
+import matplotlib.pyplot as plt
+from nltk.tokenize import sent_tokenize
 from rouge_score import rouge_scorer
-import textstat
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
-def load_text(file_path):
-    with open(file_path, "r", encoding="utf-8") as f:
-        return f.read().strip()
-
-def compute_metrics(original, summary):
-    metrics = {}
-
-    # Length-based
-    orig_len = len(original.split())
-    sum_len = len(summary.split())
-    metrics["Original Length"] = orig_len
-    metrics["Summary Length"] = sum_len
-    metrics["Compression Ratio"] = round(sum_len / orig_len, 3) if orig_len > 0 else 0
-
-    # Readability (summary only)
-    metrics["Flesch Reading Ease"] = textstat.flesch_reading_ease(summary)
-    metrics["Gunning Fog Index"] = textstat.gunning_fog(summary)
-
-    # ROUGE (using judgment as reference, summary as system output)
-    scorer = rouge_scorer.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
-    scores = scorer.score(original, summary)
-    for k, v in scores.items():
-        metrics[f"{k.upper()} Precision"] = round(v.precision, 3)
-        metrics[f"{k.upper()} Recall"] = round(v.recall, 3)
-        metrics[f"{k.upper()} F1"] = round(v.fmeasure, 3)
-
-    return metrics
-
-def evaluate_dataset(judgement_folder, summary_folder, output_csv="summary_eval.csv"):
-    rows = []
+def evaluate_dataset(judgement_folder, summary_folder, output_csv="evaluation_results.csv"):
+    # Make sure folders exist
+    if not os.path.exists(judgement_folder) or not os.path.exists(summary_folder):
+        print("Error: One of the dataset folders does not exist.")
+        return
+    
     judgement_files = sorted(os.listdir(judgement_folder))
     summary_files = sorted(os.listdir(summary_folder))
 
-    # Match by filename (assuming same base name, different folder)
+    results = []
+
     for j_file, s_file in zip(judgement_files, summary_files):
-        j_path = os.path.join(judgement_folder, j_file)
-        s_path = os.path.join(summary_folder, s_file)
+        with open(os.path.join(judgement_folder, j_file), "r", encoding="utf-8") as f:
+            reference_text = f.read()
+        with open(os.path.join(summary_folder, s_file), "r", encoding="utf-8") as f:
+            system_summary = f.read()
 
-        if not os.path.isfile(j_path) or not os.path.isfile(s_path):
-            continue
+        # Tokenize
+        ref_sentences = sent_tokenize(reference_text)
+        sys_sentences = sent_tokenize(system_summary)
 
-        original = load_text(j_path)
-        summary = load_text(s_path)
+        # ROUGE
+        scorer = rouge_scorer.RougeScorer(['rouge1', 'rougeL'], use_stemmer=True)
+        rouge_scores = scorer.score(reference_text, system_summary)
 
-        metrics = compute_metrics(original, summary)
-        metrics["Document"] = os.path.splitext(j_file)[0]
-        rows.append(metrics)
+        # BLEU
+        smoothie = SmoothingFunction().method1
+        bleu = sentence_bleu([ref_sentences], sys_sentences, smoothing_function=smoothie)
 
-    df = pd.DataFrame(rows)
-    df.to_csv(output_csv, index=False)
-    print(f"✅ Done. Results saved to {output_csv}")
+        results.append({
+            "file": j_file,
+            "ROUGE-1": rouge_scores['rouge1'].fmeasure,
+            "ROUGE-L": rouge_scores['rougeL'].fmeasure,
+            "BLEU": bleu
+        })
 
-# Example usage
+    # Save to CSV
+    with open(output_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["file", "ROUGE-1", "ROUGE-L", "BLEU"])
+        writer.writeheader()
+        writer.writerows(results)
+
+    print(f"✅ Evaluation complete. Results saved to {output_csv}")
+
+    # --- Visualization ---
+    files = [r["file"] for r in results]
+    rouge1 = [r["ROUGE-1"] for r in results]
+    rougel = [r["ROUGE-L"] for r in results]
+    bleu = [r["BLEU"] for r in results]
+
+    plt.figure(figsize=(12, 6))
+    x = range(len(files))
+
+    plt.bar(x, rouge1, width=0.25, label="ROUGE-1", align="center")
+    plt.bar([i + 0.25 for i in x], rougel, width=0.25, label="ROUGE-L", align="center")
+    plt.bar([i + 0.5 for i in x], bleu, width=0.25, label="BLEU", align="center")
+
+    plt.xticks([i + 0.25 for i in x], files, rotation=45, ha="right")
+    plt.ylabel("Score")
+    plt.title("Evaluation Metrics per Document")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("evaluation_chart.png")
+
+    print("📊 Chart saved as evaluation_chart.png")
+
 if __name__ == "__main__":
-    evaluate_dataset("./judgement", "./summary")
+    evaluate_dataset("dataset/judgement", "dataset/summary")
